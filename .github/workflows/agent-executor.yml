@@ -1,0 +1,44 @@
+name: Agent Remote Python Executor
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_name:
+        description: 'Task Title'
+        required: true
+        type: string
+      python_code:
+        description: 'Python code to execute'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  execute-task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Execute Agent Code
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYTHON_SCRIPT: ${{ inputs.python_code }}
+          TASK_NAME: ${{ inputs.task_name }}
+        run: |
+          echo "🚀 Running Task: $TASK_NAME"
+          python -c "$PYTHON_SCRIPT"
