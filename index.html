@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autonomous GitHub AI Agent (Gemma 4-31B)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 flex flex-col h-screen font-sans">
+
+  <!-- شريط العنوان والإعدادات -->
+  <header class="bg-gray-900 border-b border-gray-800 p-4 flex justify-between items-center shadow-lg">
+    <div class="flex items-center space-x-3 space-x-reverse">
+      <div class="bg-gradient-to-tr from-emerald-500 to-teal-400 p-2 rounded-xl text-black">
+        <i class="fa-solid fa-robot text-xl"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-lg leading-tight">GitHub Super Agent</h1>
+        <span class="text-xs text-emerald-400 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Groq • Gemma 4-31B
+        </span>
+      </div>
+    </div>
+    <button onclick="toggleModal(true)" class="bg-gray-800 hover:bg-gray-700 text-sm px-4 py-2 rounded-lg border border-gray-700 flex items-center gap-2 transition">
+      <i class="fa-solid fa-gear text-gray-400"></i> الإعدادات والصلاحيات
+    </button>
+  </header>
+
+  <!-- صندوق المحادثة -->
+  <main id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-4 max-w-4xl w-full mx-auto">
+    <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-4 text-sm text-gray-400 flex gap-3 items-start">
+      <i class="fa-solid fa-circle-info text-blue-400 text-lg mt-0.5"></i>
+      <div>
+        <p class="font-semibold text-gray-200 mb-1">أهلاً بك! هذا الوكيل يمتلك وصولاً كاملاً لحسابك على GitHub.</p>
+        <p>يمكنه استعراض مستودعاتك، قراءة الكود، التعديل وإنشاء ملفات جديدة، وإطلاق مهام بايثون عبر <b>GitHub Actions</b>. اضغط على الإعدادات لإدخال مفاتيحك للبدء.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- شريط الإدخال -->
+  <footer class="bg-gray-900 border-t border-gray-800 p-4">
+    <div class="max-w-4xl mx-auto flex gap-2">
+      <textarea id="user-input" rows="1" placeholder="اطلب أي شيء (مثال: أنشئ ملف README احترافي، أو شغل سكريبت بايثون)..."
+        class="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500 resize-none"></textarea>
+      <button id="send-btn" onclick="handleUserMessage()" class="bg-emerald-500 hover:bg-emerald-600 text-black font-semibold px-6 rounded-xl transition flex items-center justify-center">
+        <i class="fa-solid fa-arrow-up"></i>
+      </button>
+    </div>
+  </footer>
+
+  <!-- نافذة الإعدادات (Modal) -->
+  <div id="settings-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-lg">إعدادات الاتصال والوصول الكامل</h2>
+        <button onclick="toggleModal(false)" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block text-gray-400 mb-1">Groq API Key</label>
+          <input type="password" id="groq-key" placeholder="gsk_..." class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-white">
+        </div>
+        <div>
+          <label class="block text-gray-400 mb-1">GitHub Personal Access Token (Classic)</label>
+          <input type="password" id="gh-token" placeholder="ghp_..." class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-white">
+          <span class="text-xs text-gray-500">يتطلب صلاحيات <code>repo</code> و <code>workflow</code> للتحكم الكامل.</span>
+        </div>
+        <div>
+          <label class="block text-gray-400 mb-1">المستودع الافتراضي الحالي (Owner/Repo)</label>
+          <input type="text" id="target-repo" placeholder="username/repo-name" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-white">
+        </div>
+      </div>
+
+      <button onclick="saveSettings()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-semibold py-2.5 rounded-lg transition">
+        حفظ الإعدادات في المتصفح
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // الأدوات المتاحة لـ Gemma 4-31B للتحكم بـ GitHub
+    const TOOLS_SCHEMA = [
+      {
+        type: "function",
+        function: {
+          name: "list_repositories",
+          description: "List all repositories of the authenticated GitHub user.",
+          parameters: { type: "object", properties: {} }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_file_content",
+          description: "Get the content of a file from a GitHub repository.",
+          parameters: {
+            type: "object",
+            properties: {
+              repo: { type: "string", description: "Repository in format 'owner/repo'" },
+              path: { type: "string", description: "File path in repository" }
+            },
+            required: ["repo", "path"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "commit_file",
+          description: "Create or update a file in a GitHub repository with full commit access.",
+          parameters: {
+            type: "object",
+            properties: {
+              repo: { type: "string", description: "Repository in format 'owner/repo'" },
+              path: { type: "string", description: "File path" },
+              content: { type: "string", description: "Raw file content" },
+              commit_message: { type: "string", description: "Commit message" }
+            },
+            required: ["repo", "path", "content", "commit_message"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "trigger_github_action_python",
+          description: "Trigger a GitHub Action to execute arbitrary Python code directly on GitHub runners.",
+          parameters: {
+            type: "object",
+            properties: {
+              repo: { type: "string", description: "Repository in format 'owner/repo'" },
+              task_name: { type: "string", description: "Title or short description of the task" },
+              python_code: { type: "string", description: "Executable Python code to run on GitHub Actions" }
+            },
+            required: ["repo", "task_name", "python_code"]
+          }
+        }
+      }
+    ];
+
+    let conversation = [
+      {
+        role: "system",
+        content: "You are an Autonomous AI Engineer Agent powered by Google's Gemma 4-31B running on Groq. " +
+                 "You have FULL control and access over the user's GitHub account through tools. " +
+                 "You can list repositories, read code, commit updates, and trigger GitHub Actions to run Python scripts. " +
+                 "Always inform the user what actions you are about to execute, run the required tools, and summarize the output clearly."
+      }
+    ];
+
+    // إدارة الإعدادات
+    function toggleModal(show) {
+      document.getElementById('settings-modal').classList.toggle('hidden', !show);
+      if(show) {
+        document.getElementById('groq-key').value = localStorage.getItem('GROQ_KEY') || '';
+        document.getElementById('gh-token').value = localStorage.getItem('GH_TOKEN') || '';
+        document.getElementById('target-repo').value = localStorage.getItem('TARGET_REPO') || '';
+      }
+    }
+
+    function saveSettings() {
+      localStorage.setItem('GROQ_KEY', document.getElementById('groq-key').value.trim());
+      localStorage.setItem('GH_TOKEN', document.getElementById('gh-token').value.trim());
+      localStorage.setItem('TARGET_REPO', document.getElementById('target-repo').value.trim());
+      toggleModal(false);
+      appendMessage("agent", "✅ تم حفظ بيانات الاعتماد محلياً بنجاح!");
+    }
+
+    function appendMessage(role, text) {
+      const box = document.getElementById('chat-box');
+      const isUser = role === "user";
+      const div = document.createElement('div');
+      div.className = `flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`;
+      
+      div.innerHTML = `
+        <div class="max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed ${
+          isUser ? 'bg-emerald-600 text-white rounded-bl-none' : 'bg-gray-900 border border-gray-800 text-gray-200 rounded-br-none shadow-md'
+        }">
+          <div class="markdown-body">${marked.parse(text)}</div>
+        </div>
+      `;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // دوال الربط مع GitHub API
+    async function executeGitHubTool(name, args) {
+      const token = localStorage.getItem('GH_TOKEN');
+      if (!token) throw new Error("يرجى إدخال GitHub Token من شاشة الإعدادات أولاً.");
+
+      const headers = {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json"
+      };
+
+      if (name === "list_repositories") {
+        const res = await fetch("https://api.github.com/user/repos?per_page=30&sort=updated", { headers });
+        const data = await res.json();
+        return JSON.stringify(data.map(r => ({ name: r.full_name, private: r.private, url: r.html_url })));
+      }
+
+      if (name === "get_file_content") {
+        const res = await fetch(`https://api.github.com/repos/${args.repo}/contents/${args.path}`, { headers });
+        const data = await res.json();
+        if (!res.ok) return `Error: ${data.message}`;
+        return atob(data.content);
+      }
+
+      if (name === "commit_file") {
+        let sha = undefined;
+        try {
+          const check = await fetch(`https://api.github.com/repos/${args.repo}/contents/${args.path}`, { headers });
+          if (check.ok) {
+            const fileData = await check.json();
+            sha = fileData.sha;
+          }
+        } catch(e) {}
+
+        const body = {
+          message: args.commit_message,
+          content: btoa(unescape(encodeURIComponent(args.content))),
+          ...(sha && { sha })
+        };
+
+        const res = await fetch(`https://api.github.com/repos/${args.repo}/contents/${args.path}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(body)
+        });
+        const resData = await res.json();
+        return JSON.stringify(resData);
+      }
+
+      if (name === "trigger_github_action_python") {
+        const res = await fetch(`https://api.github.com/repos/${args.repo}/actions/workflows/agent-executor.yml/dispatches`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            ref: "main",
+            inputs: {
+              task_name: args.task_name,
+              python_code: args.python_code
+            }
+          })
+        });
+        if (res.status === 204) {
+          return "✅ تم إطلاق سير عمل GitHub Actions بنجاح وجاري تنفيذ كود بايثون على السحابة!";
+        } else {
+          const error = await res.json();
+          return `فشل إطلاق السير: ${JSON.stringify(error)}`;
+        }
+      }
+
+      throw new Error(`أداة غير معروفة: ${name}`);
+    }
+
+    // دورة معالجة الرسائل مع Groq
+    async function handleUserMessage() {
+      const input = document.getElementById('user-input');
+      const text = input.value.trim();
+      const groqKey = localStorage.getItem('GROQ_KEY');
+
+      if (!text) return;
+      if (!groqKey) {
+        toggleModal(true);
+        return;
+      }
+
+      input.value = '';
+      appendMessage("user", text);
+      conversation.push({ role: "user", content: text });
+
+      try {
+        let isComplete = false;
+        
+        while (!isComplete) {
+          const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${groqKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: "gemma-4-31b-it",
+              messages: conversation,
+              tools: TOOLS_SCHEMA,
+              tool_choice: "auto",
+              temperature: 0.2
+            })
+          });
+
+          const data = await response.json();
+          if (data.error) throw new Error(data.error.message);
+
+          const choice = data.choices[0].message;
+          conversation.push(choice);
+
+          if (choice.tool_calls && choice.tool_calls.length > 0) {
+            for (const tool of choice.tool_calls) {
+              const toolName = tool.function.name;
+              const toolArgs = JSON.parse(tool.function.arguments);
+              
+              appendMessage("agent", `⚙️ *تشغيل الأداة: \`${toolName}\`...*`);
+
+              let result;
+              try {
+                result = await executeGitHubTool(toolName, toolArgs);
+              } catch (err) {
+                result = `Error: ${err.message}`;
+              }
+
+              conversation.push({
+                role: "tool",
+                tool_call_id: tool.id,
+                content: typeof result === 'string' ? result : JSON.stringify(result)
+              });
+            }
+          } else {
+            appendMessage("agent", choice.content);
+            isComplete = true;
+          }
+        }
+
+      } catch (err) {
+        appendMessage("agent", `❌ **خطأ:** ${err.message}`);
+      }
+    }
+  </script>
+</body>
+  </html>
